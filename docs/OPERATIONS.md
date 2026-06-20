@@ -37,6 +37,30 @@ The health check returns a 200 OK response with a JSON body:
 }
 ```
 
+#### Health Check Semantics
+
+The health check tool validates responses according to the following rules:
+
+**Success Criteria (Status: OK)**
+- HTTP status code is 200
+- Response body is not empty
+- Response body is valid JSON (for JSON responses)
+- Response content matches the expected content-type
+
+**Failure Reasons (Status: CRITICAL)**
+- Empty response body with HTTP 200: Service is not responding properly
+- Malformed JSON response with HTTP 200: Service is returning invalid data
+- HTTP 500 or higher: Service is experiencing an error
+- Connection refused: Service is not listening
+- Connection timeout: Service is not responding within the timeout period
+- Invalid content-type for the response
+
+**Warning Status (Status: WARNING)**
+- HTTP 400-499 client errors: Request was rejected
+- Other non-critical HTTP errors
+
+A silent service (returning empty responses or malformed data) is not considered healthy, even if the socket is reachable. The health check ensures that services are not only running but also responding with valid, expected data.
+
 ### Prometheus Metrics
 
 Each service exposes Prometheus metrics at `/metrics` on the same port as the

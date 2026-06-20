@@ -75,10 +75,25 @@ def check_http_service(host: str, port: int, path: str, timeout: int) -> Tuple[s
         conn.request("GET", path)
         resp = conn.getresponse()
         status = resp.status
-        body = resp.read().decode("utf-8", errors="replace")[:200]
+        content_type = resp.getheader("content-type", "")
+        body = resp.read().decode("utf-8", errors="replace")
         conn.close()
 
+        # Check for empty response body
+        if status == 200 and not body.strip():
+            return "CRITICAL", "HTTP 200 but response is empty", status
+
+        # Try to validate JSON if content-type indicates JSON
+        if status == 200 and "application/json" in content_type.lower():
+            try:
+                json.loads(body)
+            except json.JSONDecodeError as e:
+                return "CRITICAL", f"HTTP 200 but response is malformed JSON: {str(e)[:50]}", status
+
+        # For 200 responses with other content types, still require non-empty body
         if status == 200:
+            if "text/html" in content_type.lower() and not body.strip():
+                return "CRITICAL", "HTTP 200 but response is empty", status
             result = "OK"
             detail = f"HTTP {status}"
         elif status < 500:
@@ -89,8 +104,12 @@ def check_http_service(host: str, port: int, path: str, timeout: int) -> Tuple[s
             detail = f"HTTP {status}: {body[:100]}"
 
         return result, detail, status
+    except socket.timeout:
+        return "CRITICAL", f"HTTP timeout after {timeout}s", 0
+    except ConnectionRefusedError:
+        return "CRITICAL", "Connection refused", 0
     except Exception as e:
-        return "CRITICAL", str(e), 0
+        return "CRITICAL", f"HTTP error: {str(e)}", 0
 
 
 def check_tcp_port(host: str, port: int, timeout: int) -> Tuple[str, str, float]:
