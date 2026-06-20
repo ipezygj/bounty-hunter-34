@@ -2,6 +2,15 @@
 
 Trading and risk platform.
 
+<div align="center">
+
+[![Build Status](https://img.shields.io/github/actions/workflow/status/lobster-trap/Kickama/build.yml?style=flat-square&logo=github)](https://github.com/lobster-trap/Kickama/actions)
+[![Code Style](https://img.shields.io/badge/code%20style-editorconfig-blue?style=flat-square)](https://editorconfig.org/)
+[![License](https://img.shields.io/badge/license-MIT%2FApache%2FGPL-green?style=flat-square)](LICENSE)
+[![Stack](https://img.shields.io/badge/stack-Rust%2FTypeScript%2FPython-orange?style=flat-square)](README.md)
+
+</div>
+
 ## Getting Started
 
 Clone the repository and install dependencies for the modules you plan to touch:
