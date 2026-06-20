@@ -639,15 +639,12 @@ def generate_logd(
     display_logd = logd_path.relative_to(ROOT)
     print(f"\n  {color('▸', Colors.CYAN)} Finalizing diagnostics for {color(str(display_logd), Colors.BOLD)}...")
 
-    # Always write the JSON report first. The encrypted .logd is useful, but the
-    # report is required even when the build failed before compilation started or
-    # when encryptly itself is unavailable.
-    write_diagnostic_report(metadata_path, build_diagnostic_report(results, commit_id))
-
     encryptly_bin = get_encryptly_bin()
     if encryptly_bin is None:
         error = f"encryptly binary not found ({encryptly_platform_help()}); cannot create {display_logd}"
         print(f"    {color('✗', Colors.RED)} {error}")
+        # Always write the JSON report even when encryptly is unavailable.
+        # The report is required even when build failed before compilation started.
         write_diagnostic_report(
             metadata_path,
             build_diagnostic_report(
