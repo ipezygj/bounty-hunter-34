@@ -13,6 +13,75 @@
 > The known issues from the migration are tracked in the "K8s Migration Known
 > Issues" spreadsheet which is linked from the team's shared drive.
 
+## Frailbox Self-Test
+
+The Frailbox runtime includes a self-test mode that reviewers can use to verify the core components without needing to understand internal test commands.
+
+### Running the Self-Test
+
+The self-test validates:
+- Arena allocator initialization and allocation
+- Logger initialization and core functions
+- Sandbox initialization and configuration validation
+- Connector protocol basics
+- File structure and include guards
+
+#### From Make
+
+```bash
+cd frailbox
+make self-test
+```
+
+This will run the self-test and print a concise summary with passed, failed, and skipped counts.
+
+#### From Python Build System
+
+```bash
+python3 build.py
+```
+
+The build system automatically runs the self-test as part of the frailbox module build and reports any failures.
+
+### Self-Test Output
+
+The self-test generates two outputs:
+
+1. **Console Output**: A human-readable summary with test names and pass/fail status
+2. **JSON Report**: `frailbox/self-test-results.json` containing:
+   - Test suite metadata
+   - Timestamp of test execution
+   - Summary (total, passed, failed, skipped)
+   - Individual test results with error messages
+
+### Self-Test Results Format
+
+```json
+{
+  "test_suite": "frailbox-self-test",
+  "timestamp": 1234567890,
+  "summary": {
+    "total": 12,
+    "passed": 12,
+    "failed": 0,
+    "skipped": 0
+  },
+  "results": [
+    {
+      "name": "test_name",
+      "status": "PASS",
+      "error": null
+    }
+  ]
+}
+```
+
+### Interpreting Results
+
+- **All Passed**: All 12 tests passed - the core frailbox components are initialized and ready
+- **Some Failed**: Check the error messages in the JSON report for specific issues
+- **Non-Zero Exit Code**: One or more tests failed - the build cannot proceed
+
 ## Monitoring
 
 ### Health Check Endpoints

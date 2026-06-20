@@ -1,0 +1,72 @@
+{
+  "test_suite": "frailbox-self-test",
+  "timestamp": 1781981855,
+  "summary": {
+    "total": 12,
+    "passed": 12,
+    "failed": 0,
+    "skipped": 0
+  },
+  "results": [
+    {
+      "name": "arena_headers_exist",
+      "status": "PASS",
+      "error": null
+    },
+    {
+      "name": "arena_source_exists",
+      "status": "PASS",
+      "error": null
+    },
+    {
+      "name": "logger_headers_exist",
+      "status": "PASS",
+      "error": null
+    },
+    {
+      "name": "logger_source_exists",
+      "status": "PASS",
+      "error": null
+    },
+    {
+      "name": "sandbox_headers_exist",
+      "status": "PASS",
+      "error": null
+    },
+    {
+      "name": "sandbox_source_exists",
+      "status": "PASS",
+      "error": null
+    },
+    {
+      "name": "makefile_has_self_test",
+      "status": "PASS",
+      "error": null
+    },
+    {
+      "name": "c_source_files_readable",
+      "status": "PASS",
+      "error": null
+    },
+    {
+      "name": "headers_have_guards",
+      "status": "PASS",
+      "error": null
+    },
+    {
+      "name": "main_entry_point_exists",
+      "status": "PASS",
+      "error": null
+    },
+    {
+      "name": "tests_directory_exists",
+      "status": "PASS",
+      "error": null
+    },
+    {
+      "name": "docs_operations_exists",
+      "status": "PASS",
+      "error": null
+    }
+  ]
+}

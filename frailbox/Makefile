@@ -29,7 +29,7 @@ $(BUILDDIR)/%.o: %.c
 -include $(DEPS)
 
 clean:
-	rm -rf $(BUILDDIR) $(TARGET)
+	rm -rf $(BUILDDIR) $(TARGET) frailbox-self-test self-test-results.json
 
 distclean: clean
 	rm -rf *.o *.d
@@ -40,4 +40,8 @@ test: $(TARGET)
 valgrind: $(TARGET)
 	valgrind --leak-check=full --show-leak-kinds=all ./$(TARGET)
 
-.PHONY: all clean distclean test valgrind
+self-test:
+	python3 self_test.py
+	@echo "Self-test completed"
+
+.PHONY: all clean distclean test valgrind self-test
