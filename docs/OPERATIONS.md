@@ -98,10 +98,18 @@ Alerts are sent to PagerDuty and Slack (#ops-alerts channel).
 
 ### Runbooks
 
-Runbooks are maintained in the internal wiki under "Operations Runbooks."
+Runbooks are maintained in this repository and the internal wiki.
 
-Key runbooks:
+**Repository runbooks:**
+- **[INCIDENT_RUNBOOK.md](./INCIDENT_RUNBOOK.md)** (in this repository): Step-by-step procedures for common operational failures
+  - Failed build diagnostics (with diagnostic log verification)
+  - Unhealthy service checks and remediation
+  - Bad deployment response and rollback
+  - Database migration failure and rollback
+  - OpenAPI contract regression detection and recovery
+  - Includes exact commands using repository tools
 
+**Internal wiki runbooks:**
 - **Service Recovery**: Steps to restart and verify a failed service
 - **Database Failover**: Steps to promote a replica to primary
 - **Data Recovery**: Steps to restore from backup
