@@ -141,9 +141,17 @@ class TextLogParser(LogParser):
         if not line:
             return None
 
+        # Only parse if it looks like a log line (has timestamp or log level)
+        timestamp = self.extract_timestamp(line)
+        level = self.extract_level(line)
+
+        # If neither timestamp nor recognizable level, it's not a valid log line
+        if timestamp is None and level == 'unknown':
+            return None
+
         return {
-            'timestamp': self.extract_timestamp(line),
-            'level': self.extract_level(line),
+            'timestamp': timestamp,
+            'level': level,
             'service': self.extract_service(line),
             'message': line,
             'fields': {'raw': line},
@@ -204,7 +212,7 @@ class NginxLogParser(LogParser):
 
 class LogAggregator:
     def __init__(self):
-        self.parsers = [JSONLogParser(), TextLogParser(), NginxLogParser()]
+        self.parsers = [JSONLogParser(), NginxLogParser(), TextLogParser()]
         self.entries: List[Dict[str, Any]] = []
         self.level_counts: Counter = Counter()
         self.service_counts: Counter = Counter()
@@ -212,18 +220,24 @@ class LogAggregator:
         self.error_patterns: Counter = Counter()
         self.top_errors: Counter = Counter()
         self.errors_by_service: Dict[str, List[str]] = defaultdict(list)
+        self.current_source: Optional[str] = None
+        self.line_number: int = 0
 
     def process_file(self, filepath: str) -> int:
         parsed_count = 0
+        self.current_source = filepath
+        self.line_number = 0
         try:
             if filepath.endswith('.gz'):
                 with gzip.open(filepath, 'rt', errors='replace') as f:
                     for line in f:
+                        self.line_number += 1
                         if self._parse_line(line):
                             parsed_count += 1
             else:
                 with open(filepath, 'r', errors='replace') as f:
                     for line in f:
+                        self.line_number += 1
                         if self._parse_line(line):
                             parsed_count += 1
         except Exception as e:
@@ -241,9 +255,13 @@ class LogAggregator:
         return total
 
     def _parse_line(self, line: str) -> bool:
+        parsed = False
         for parser in self.parsers:
             entry = parser.parse(line)
             if entry:
+                # Add source file and line number to entry
+                entry['source'] = self.current_source
+                entry['source_line'] = self.line_number
                 self.entries.append(entry)
                 ts = entry.get('timestamp')
                 if ts:
@@ -259,8 +277,24 @@ class LogAggregator:
                         msg = msg[:200]
                     self.errors_by_service[service].append(msg)
                     self.error_patterns[msg] += 1
-                return True
-        return False
+                parsed = True
+                break
+
+        # If no parser succeeded, create a warning record
+        if not parsed:
+            warning_entry = {
+                'timestamp': None,
+                'level': 'parse_error',
+                'service': None,
+                'message': 'Failed to parse log line',
+                'source': self.current_source,
+                'source_line': self.line_number,
+                'metadata': {'raw_line': line.strip()},
+                'format': 'unparseable',
+            }
+            self.entries.append(warning_entry)
+
+        return parsed
 
     def get_summary(self) -> Dict[str, Any]:
         return {
@@ -359,6 +393,53 @@ class LogAggregator:
             }, f, indent=2, default=str)
         logger.info(f"Report exported to {output_path}")
 
+    def export_jsonl(self, output_path: str):
+        """Export logs in JSONL format with timestamp ordering."""
+        # Sort entries by timestamp (entries without timestamp go to the end, ordered by source and line)
+        def sort_key(entry):
+            ts = entry.get('timestamp')
+            if ts is not None:
+                return (0, ts, entry.get('source', ''), entry.get('source_line', 0))
+            else:
+                return (1, 0, entry.get('source', ''), entry.get('source_line', 0))
+
+        sorted_entries = sorted(self.entries, key=sort_key)
+
+        with open(output_path, 'w') as f:
+            for entry in sorted_entries:
+                # Build JSONL record with required fields
+                record = {
+                    'timestamp': entry.get('timestamp'),
+                    'level': entry.get('level', 'unknown'),
+                    'source': entry.get('source', 'unknown'),
+                    'message': entry.get('message', ''),
+                    'metadata': {}
+                }
+
+                # Add additional metadata fields
+                if entry.get('service'):
+                    record['metadata']['service'] = entry['service']
+                if entry.get('source_line'):
+                    record['metadata']['source_line'] = entry['source_line']
+                if entry.get('format'):
+                    record['metadata']['format'] = entry['format']
+                if entry.get('fields'):
+                    record['metadata']['fields'] = entry['fields']
+
+                # For unparseable lines, include the raw line in metadata
+                if entry.get('level') == 'parse_error' and 'metadata' in entry:
+                    record['metadata'].update(entry['metadata'])
+
+                # Convert timestamp to ISO format if available
+                if record['timestamp']:
+                    record['timestamp'] = datetime.fromtimestamp(
+                        record['timestamp'], tz=timezone.utc
+                    ).isoformat()
+
+                f.write(json.dumps(record, default=str) + '\n')
+
+        logger.info(f"Exported {len(sorted_entries)} entries to {output_path} in JSONL format")
+
     def generate_html_report(self, output_path: str):
         summary = self.get_summary()
         html = f"""<!DOCTYPE html>
@@ -409,7 +490,7 @@ def parse_args():
     parser.add_argument("--input", "-i", help="Input log file or glob pattern")
     parser.add_argument("--dir", help="Directory containing log files")
     parser.add_argument("--output", "-o", default="log_report.json", help="Output file path")
-    parser.add_argument("--format", choices=["json", "csv", "html"], default="json", help="Output format")
+    parser.add_argument("--format", choices=["text", "json", "jsonl", "csv", "html"], default="text", help="Output format")
     parser.add_argument("--search", help="Search for a string in logs")
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
     return parser.parse_args()
@@ -445,18 +526,27 @@ def main():
             print(f"  ... and {len(results) - 20} more")
 
     summary = aggregator.get_summary()
-    print(f"\nSummary:")
-    print(f"  Total entries: {summary['total_entries']:,}")
-    print(f"  Time range: {summary.get('time_range', {}).get('start', 'N/A')} to {summary.get('time_range', {}).get('end', 'N/A')}")
-    print(f"  Error rate: {summary.get('error_rate', 0)}%")
-    print(f"  By level: {', '.join(f'{k}={v}' for k, v in summary.get('by_level', {}).items())}")
-    print(f"  By service: {', '.join(f'{k}={v}' for k, v in summary.get('by_service', {}).items())}")
 
-    if args.format == "csv":
+    # For text format, print summary to console
+    if args.format == "text":
+        print(f"\nSummary:")
+        print(f"  Total entries: {summary['total_entries']:,}")
+        print(f"  Time range: {summary.get('time_range', {}).get('start', 'N/A')} to {summary.get('time_range', {}).get('end', 'N/A')}")
+        print(f"  Error rate: {summary.get('error_rate', 0)}%")
+        print(f"  By level: {', '.join(f'{k}={v}' for k, v in summary.get('by_level', {}).items())}")
+        print(f"  By service: {', '.join(f'{k}={v}' for k, v in summary.get('by_service', {}).items())}")
+
+    # Export based on format
+    if args.format == "text":
+        # Text format doesn't write to output file, just console
+        pass
+    elif args.format == "csv":
         aggregator.export_csv(args.output)
     elif args.format == "html":
         aggregator.generate_html_report(args.output)
-    else:
+    elif args.format == "jsonl":
+        aggregator.export_jsonl(args.output)
+    else:  # json
         aggregator.export_json(args.output)
 
     return 0

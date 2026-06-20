@@ -276,6 +276,86 @@ Audit logs are retained for 365 days and include:
 | Penetration test | Quarterly | External vendor |
 | Compliance audit | Annually | External auditor |
 
+## Log Aggregation
+
+### Log Aggregator Tool
+
+The legacy log aggregator (`tools/log_aggregator.py`) supports multiple output formats for processing archived logs.
+
+#### JSONL Output Format
+
+The JSONL (JSON Lines) format provides machine-readable output where each line is a complete JSON object representing a single log entry. This format is suitable for downstream processing, streaming pipelines, and analytical tooling.
+
+**Usage:**
+
+```bash
+python3 tools/log_aggregator.py --input /var/log/app/*.log --format jsonl --output logs.jsonl
+```
+
+**JSONL Schema:**
+
+Each line in the output file is a JSON object with the following structure:
+
+```json
+{
+  "timestamp": "2024-01-15T10:30:45+00:00",
+  "level": "error",
+  "source": "/var/log/app/service.log",
+  "message": "Database connection timeout",
+  "metadata": {
+    "service": "backend-api",
+    "source_line": 142,
+    "format": "json",
+    "fields": {
+      "request_id": "abc123",
+      "duration_ms": 5000
+    }
+  }
+}
+```
+
+**Field Definitions:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `timestamp` | string\|null | Yes | ISO 8601 timestamp when the log was generated. Null if timestamp could not be parsed. |
+| `level` | string | Yes | Log level: `info`, `warn`, `error`, `debug`, `parse_error` for unparseable lines. |
+| `source` | string | Yes | Source file path where the log entry was read from. |
+| `message` | string | Yes | The log message text. For parse errors, this is "Failed to parse log line". |
+| `metadata` | object | Yes | Additional structured data about the log entry. |
+| `metadata.service` | string | No | Service name extracted from the log entry. |
+| `metadata.source_line` | integer | No | Line number in the source file. |
+| `metadata.format` | string | No | Detected log format: `json`, `text`, `nginx`, or `unparseable`. |
+| `metadata.fields` | object | No | Original parsed fields from structured logs (JSON, nginx). |
+| `metadata.raw_line` | string | No | For parse errors, the original unparseable line. |
+
+**Ordering:**
+
+Records are ordered by timestamp across all input files. Entries without a timestamp are placed after timestamped entries and ordered by source file and line number.
+
+**Parse Errors:**
+
+Lines that cannot be parsed by any format parser are included as warning records with `level: "parse_error"`. These records preserve the original line in `metadata.raw_line` for debugging.
+
+**Example Workflow:**
+
+```bash
+# Aggregate logs from multiple sources
+python3 tools/log_aggregator.py \
+  --input /var/log/app/*.log \
+  --format jsonl \
+  --output aggregated.jsonl
+
+# Process with jq
+cat aggregated.jsonl | jq 'select(.level == "error")'
+
+# Count errors by service
+cat aggregated.jsonl | jq -r 'select(.level == "error") | .metadata.service' | sort | uniq -c
+
+# Extract parse errors for review
+cat aggregated.jsonl | jq 'select(.level == "parse_error")' > parse_errors.jsonl
+```
+
 ## Troubleshooting
 
 ### Common Issues
