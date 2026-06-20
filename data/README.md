@@ -30,6 +30,47 @@ WARNING: The seed data includes test API keys and passwords that are publicly
 visible in this repository. Do NOT use these credentials in production.
 The seed data is intended for local development only.
 
+### Test Data Generator
+
+The `tools/data_generator.py` script generates test data for development and testing.
+It supports deterministic seed-based generation for reproducible test scenarios.
+
+**Basic usage:**
+```bash
+# Generate test data with a specific seed
+python3 tools/data_generator.py --seed 42 --output-dir ./test_data
+
+# Generate with a random seed and print it for later reproduction
+python3 tools/data_generator.py --print-seed --output-dir ./test_data
+
+# Use a custom base timestamp (milliseconds since epoch)
+python3 tools/data_generator.py --seed 1234 --base-timestamp 1672531200000
+```
+
+**Reproducibility:**
+When you use the same seed and arguments, the generator produces byte-for-byte
+identical output. This is essential for creating reproducible test fixtures and
+benchmark datasets:
+
+```bash
+# Run 1
+python3 tools/data_generator.py --seed 8675309 --users 50 --output-dir ./run1
+
+# Run 2 (produces identical output)
+python3 tools/data_generator.py --seed 8675309 --users 50 --output-dir ./run2
+
+# Verify they are identical
+diff -r ./run1 ./run2
+```
+
+**Validation:**
+To validate deterministic behavior, run the validation script:
+```bash
+python3 tools/validate_data_generator_seed.py
+```
+
+This tests that multiple runs with the same seed produce identical output.
+
 ## Migration Files
 
 Migration files follow the naming convention: `{YYYYMMDDHHMMSS}_{description}.sql`
