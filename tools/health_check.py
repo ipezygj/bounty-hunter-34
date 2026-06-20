@@ -79,6 +79,19 @@ def check_http_service(host: str, port: int, path: str, timeout: int) -> Tuple[s
         conn.close()
 
         if status == 200:
+            # Reject empty/blank responses as CRITICAL
+            if not body or not body.strip():
+                return "CRITICAL", f"HTTP {status}: Empty response body", status
+            
+            # Validate JSON content type if present
+            if "json" in content_type:
+                try:
+                    json.loads(body)
+                except json.JSONDecodeError as je:
+                    return "CRITICAL", f"HTTP {status}: Malformed JSON - {str(je)[:80]}", status
+            elif content_type and "json" not in content_type and body.startswith(("{", "[")):
+                # Body looks like JSON but content-type does not match
+                return "CRITICAL", f"HTTP {status}: Content-Type mismatch (expected JSON, got {content_type})", status
             result = "OK"
             detail = f"HTTP {status}"
         elif status < 500:
