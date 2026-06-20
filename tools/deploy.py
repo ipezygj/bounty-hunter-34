@@ -111,6 +111,48 @@ ENVIRONMENTS = {
 
 ROLLBACK_VERSIONS: Dict[str, List[str]] = {}
 
+# Global counter for dry-run actions
+_dry_run_action_count = 0
+
+SENSITIVE_ENV_PATTERNS = ["TOKEN", "SECRET", "KEY", "PASSWORD"]
+
+
+def is_sensitive_env_var(name: str) -> bool:
+    """Check if an environment variable name contains sensitive patterns."""
+    upper_name = name.upper()
+    return any(pattern in upper_name for pattern in SENSITIVE_ENV_PATTERNS)
+
+
+def log_env_var(name: str, for_dry_run: bool = False):
+    """Log environment variable name, redacting sensitive values."""
+    value = os.environ.get(name)
+    if value is None:
+        return
+
+    if is_sensitive_env_var(name):
+        if for_dry_run:
+            print(f"  [ENV] {name}=[REDACTED]")
+    else:
+        if for_dry_run:
+            print(f"  [ENV] {name}={value}")
+
+
+def increment_dry_run_counter():
+    """Increment the global dry-run action counter."""
+    global _dry_run_action_count
+    _dry_run_action_count += 1
+
+
+def get_dry_run_counter() -> int:
+    """Get the current dry-run action count."""
+    return _dry_run_action_count
+
+
+def reset_dry_run_counter():
+    """Reset the dry-run action counter."""
+    global _dry_run_action_count
+    _dry_run_action_count = 0
+
 
 def load_deployment_history(env: str) -> List[Dict]:
     history_file = f".deploy_history_{env}.json"
@@ -130,7 +172,14 @@ def save_deployment_history(env: str, history: List[Dict]):
 # ---------------------------------------------------------------------------
 
 def run_command(cmd: List[str], cwd: Optional[str] = None,
-                capture: bool = False) -> Tuple[int, str]:
+                capture: bool = False, dry_run: bool = False) -> Tuple[int, str]:
+    if dry_run:
+        increment_dry_run_counter()
+        print(f"  [DRY-RUN] Command: {' '.join(cmd)}")
+        if cwd:
+            print(f"  [DRY-RUN] Working directory: {cwd}")
+        return 0, ""
+
     try:
         if capture:
             result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=300)
@@ -144,83 +193,96 @@ def run_command(cmd: List[str], cwd: Optional[str] = None,
         return -1, f"Command not found: {cmd[0]}"
 
 
-def build_service(service: str, env: str, tag: str) -> bool:
+def build_service(service: str, env: str, tag: str, dry_run: bool = False) -> bool:
     config = SERVICES.get(service)
     if not config:
         print(f"Unknown service: {service}")
         return False
 
     print(f"Building {service} ({config['language']})...")
-    returncode, output = run_command(["sh", "-c", config["build_command"]])
+    if dry_run:
+        print(f"  [DRY-RUN] Would build: {config['build_path']}")
 
-    if returncode != 0:
+    returncode, output = run_command(["sh", "-c", config["build_command"]], dry_run=dry_run)
+
+    if returncode != 0 and not dry_run:
         print(f"Build failed:\n{output}")
         return False
 
-    print(f"Build successful: {config['build_path']}")
+    if not dry_run:
+        print(f"Build successful: {config['build_path']}")
     return True
 
 
-def test_service(service: str) -> bool:
+def test_service(service: str, dry_run: bool = False) -> bool:
     config = SERVICES.get(service)
     if not config:
         return False
 
     print(f"Testing {service}...")
-    returncode, output = run_command(["sh", "-c", config["test_command"]], capture=True)
+    returncode, output = run_command(["sh", "-c", config["test_command"]], capture=True, dry_run=dry_run)
 
-    if returncode != 0:
+    if returncode != 0 and not dry_run:
         print(f"Tests failed:\n{output[:500]}")
         return False
 
-    print(f"Tests passed")
+    if not dry_run:
+        print(f"Tests passed")
     return True
 
 
-def build_docker_image(service: str, tag: str) -> bool:
+def build_docker_image(service: str, tag: str, dry_run: bool = False) -> bool:
     config = SERVICES.get(service)
     if not config:
         return False
 
     image_name = f"tent/{service}:{tag}"
     print(f"Building Docker image: {image_name}")
+    if dry_run:
+        print(f"  [DRY-RUN] Dockerfile: {config['dockerfile']}")
+        print(f"  [DRY-RUN] Context: .")
 
     returncode, output = run_command([
         "docker", "build",
         "-t", image_name,
         "-f", config["dockerfile"],
         ".",
-    ])
+    ], dry_run=dry_run)
 
-    if returncode != 0:
+    if returncode != 0 and not dry_run:
         print(f"Docker build failed:\n{output[:500]}")
         return False
 
-    print(f"Docker image built: {image_name}")
+    if not dry_run:
+        print(f"Docker image built: {image_name}")
     return True
 
 
-def push_docker_image(service: str, tag: str, registry: str = "registry.example.com") -> bool:
+def push_docker_image(service: str, tag: str, registry: str = "registry.example.com", dry_run: bool = False) -> bool:
     image_name = f"{registry}/tent/{service}:{tag}"
     print(f"Pushing Docker image: {image_name}")
+    if dry_run:
+        print(f"  [DRY-RUN] Target registry: {registry}")
+        print(f"  [DRY-RUN] Source image: tent/{service}:{tag}")
 
     returncode, output = run_command([
         "docker", "tag", f"tent/{service}:{tag}", image_name
-    ])
-    if returncode != 0:
+    ], dry_run=dry_run)
+    if returncode != 0 and not dry_run:
         print(f"Tagging failed: {output[:500]}")
         return False
 
-    returncode, output = run_command(["docker", "push", image_name])
-    if returncode != 0:
+    returncode, output = run_command(["docker", "push", image_name], dry_run=dry_run)
+    if returncode != 0 and not dry_run:
         print(f"Push failed: {output[:500]}")
         return False
 
-    print(f"Image pushed: {image_name}")
+    if not dry_run:
+        print(f"Image pushed: {image_name}")
     return True
 
 
-def deploy_to_kubernetes(service: str, env: str, tag: str) -> bool:
+def deploy_to_kubernetes(service: str, env: str, tag: str, dry_run: bool = False) -> bool:
     env_config = ENVIRONMENTS.get(env)
     service_config = SERVICES.get(service)
     if not env_config or not service_config:
@@ -231,20 +293,30 @@ def deploy_to_kubernetes(service: str, env: str, tag: str) -> bool:
     replicas = service_config["replicas"].get(env, 1)
     image = f"registry.example.com/tent/{service}:{tag}"
 
+    if dry_run:
+        print(f"  [DRY-RUN] Target environment: {env}")
+        print(f"  [DRY-RUN] Namespace: {namespace}")
+        print(f"  [DRY-RUN] Kubernetes context: {env_config['kube_context']}")
+        print(f"  [DRY-RUN] Image: {image}")
+        print(f"  [DRY-RUN] Replicas: {replicas}")
+
     # Apply Kubernetes manifest
     manifest_file = f"deploy/k8s/{service}.yaml"
-    if not os.path.exists(manifest_file):
+    if not os.path.exists(manifest_file) and not dry_run:
         print(f"Manifest not found: {manifest_file}")
         return False
+
+    if dry_run:
+        print(f"  [DRY-RUN] Manifest file: {manifest_file}")
 
     returncode, output = run_command([
         "kubectl", "apply",
         "-f", manifest_file,
         "-n", namespace,
         "--context", env_config["kube_context"],
-    ])
+    ], dry_run=dry_run)
 
-    if returncode != 0:
+    if returncode != 0 and not dry_run:
         print(f"Kubectl apply failed:\n{output[:500]}")
         return False
 
@@ -255,9 +327,9 @@ def deploy_to_kubernetes(service: str, env: str, tag: str) -> bool:
         f"{service}={image}",
         "-n", namespace,
         "--context", env_config["kube_context"],
-    ])
+    ], dry_run=dry_run)
 
-    if returncode != 0:
+    if returncode != 0 and not dry_run:
         print(f"Image update failed:\n{output[:500]}")
         return False
 
@@ -268,31 +340,33 @@ def deploy_to_kubernetes(service: str, env: str, tag: str) -> bool:
         f"--replicas={replicas}",
         "-n", namespace,
         "--context", env_config["kube_context"],
-    ])
+    ], dry_run=dry_run)
 
-    if returncode != 0:
+    if returncode != 0 and not dry_run:
         print(f"Scale failed:\n{output[:500]}")
         return False
 
     # Wait for rollout
-    print(f"Waiting for rollout to complete...")
+    if not dry_run:
+        print(f"Waiting for rollout to complete...")
     returncode, output = run_command([
         "kubectl", "rollout", "status",
         f"deployment/{service_config['name']}",
         "-n", namespace,
         "--context", env_config["kube_context"],
         "--timeout=300s",
-    ])
+    ], dry_run=dry_run)
 
-    if returncode != 0:
+    if returncode != 0 and not dry_run:
         print(f"Rollout failed:\n{output[:500]}")
         return False
 
-    print(f"Deployment of {service} to {env} completed successfully")
+    if not dry_run:
+        print(f"Deployment of {service} to {env} completed successfully")
     return True
 
 
-def health_check(service: str, env: str) -> bool:
+def health_check(service: str, env: str, dry_run: bool = False) -> bool:
     env_config = ENVIRONMENTS.get(env)
     service_config = SERVICES.get(service)
     if not env_config or not service_config:
@@ -304,6 +378,12 @@ def health_check(service: str, env: str) -> bool:
     url = f"http://{host}:{port}{endpoint}"
 
     print(f"Health check: {url}")
+    if dry_run:
+        print(f"  [DRY-RUN] Would perform health check on: {url}")
+        print(f"  [DRY-RUN] Max retries: 30 (60 seconds)")
+        increment_dry_run_counter()
+        return True
+
     for i in range(30):
         returncode, output = run_command(["curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", url], capture=True)
         if returncode == 0 and output.strip() == "200":
@@ -317,41 +397,46 @@ def health_check(service: str, env: str) -> bool:
 
 def deploy_service(service: str, env: str, tag: str,
                    skip_build: bool = False, skip_test: bool = False,
-                   skip_health: bool = False) -> bool:
+                   skip_health: bool = False, dry_run: bool = False) -> bool:
     if not skip_build:
-        if not build_service(service, env, tag):
+        if not build_service(service, env, tag, dry_run=dry_run):
             return False
 
     if not skip_test:
-        if not test_service(service):
+        if not test_service(service, dry_run=dry_run):
             return False
 
-    if not build_docker_image(service, tag):
+    if not build_docker_image(service, tag, dry_run=dry_run):
         return False
 
-    if not push_docker_image(service, tag):
+    if not push_docker_image(service, tag, dry_run=dry_run):
         return False
 
-    if not deploy_to_kubernetes(service, env, tag):
+    if not deploy_to_kubernetes(service, env, tag, dry_run=dry_run):
         return False
 
     if not skip_health:
-        if not health_check(service, env):
-            print("WARNING: Health check failed. Deployment may be unhealthy.")
+        if not health_check(service, env, dry_run=dry_run):
+            if not dry_run:
+                print("WARNING: Health check failed. Deployment may be unhealthy.")
             return False
 
     return True
 
 
-def rollback_service(service: str, env: str, version: str) -> bool:
+def rollback_service(service: str, env: str, version: str, dry_run: bool = False) -> bool:
     env_config = ENVIRONMENTS.get(env)
     service_config = SERVICES.get(service)
     if not env_config or not service_config:
         return False
 
     print(f"Rolling back {service} to version {version}...")
+    if dry_run:
+        print(f"  [DRY-RUN] Target version: {version}")
+        print(f"  [DRY-RUN] Target environment: {env}")
+
     return deploy_service(service, env, version,
-                          skip_build=True, skip_test=True, skip_health=False)
+                          skip_build=True, skip_test=True, skip_health=False, dry_run=dry_run)
 
 
 def list_deployments(env: str, service: Optional[str] = None):
@@ -390,6 +475,9 @@ def parse_args():
 def main():
     args = parse_args()
 
+    # Reset dry-run counter at the start
+    reset_dry_run_counter()
+
     if args.list:
         list_deployments(args.env, args.service if args.service != "all" else None)
         return 0
@@ -404,50 +492,82 @@ def main():
             return 1
 
         if args.dry_run:
-            print(f"Would rollback {args.service} in {args.env} to {args.version}")
-            return 0
+            print("\n" + "="*60)
+            print("DRY-RUN MODE: Rollback Preview")
+            print("="*60 + "\n")
+            print(f"Service: {args.service}")
+            print(f"Environment: {args.env}")
+            print(f"Target version: {args.version}\n")
+            print("Environment variables that would be read:")
+            log_env_var("USER", for_dry_run=True)
+            print("\nActions that would be executed:\n")
 
-        success = rollback_service(args.service, args.env, args.version)
+        success = rollback_service(args.service, args.env, args.version, dry_run=args.dry_run)
+
+        if args.dry_run:
+            action_count = get_dry_run_counter()
+            print(f"\n{'='*60}")
+            print(f"Dry-run complete: {action_count} actions would have been executed")
+            print(f"{'='*60}\n")
+
         return 0 if success else 1
 
     services = list(SERVICES.keys()) if args.service == "all" else [args.service]
 
     if args.dry_run:
-        print(f"Would deploy to {args.env}:")
-        for s in services:
-            print(f"  {s}: tag={args.tag}, build={not args.skip_build}, "
-                  f"test={not args.skip_test}")
-        return 0
+        print("\n" + "="*60)
+        print("DRY-RUN MODE: Deployment Preview")
+        print("="*60 + "\n")
+        print(f"Environment: {args.env}")
+        print(f"Tag: {args.tag}")
+        print(f"Services: {', '.join(services)}")
+        print(f"Skip build: {args.skip_build}")
+        print(f"Skip test: {args.skip_test}")
+        print(f"Skip health: {args.skip_health}\n")
+        print("Environment variables that would be read:")
+        log_env_var("USER", for_dry_run=True)
+        print("\nActions that would be executed:\n")
 
     all_successful = True
     for service in services:
         print(f"\n{'='*60}")
         print(f"  Deploying {service} to {args.env}")
         print(f"  Tag: {args.tag}")
-        print(f"  Time: {datetime.now().isoformat()}")
+        if not args.dry_run:
+            print(f"  Time: {datetime.now().isoformat()}")
         print(f"{'='*60}\n")
 
         success = deploy_service(service, args.env, args.tag,
-                                 args.skip_build, args.skip_test, args.skip_health)
+                                 args.skip_build, args.skip_test, args.skip_health,
+                                 dry_run=args.dry_run)
 
-        # Record deployment
-        history = load_deployment_history(args.env)
-        history.append({
-            "timestamp": datetime.now().isoformat(),
-            "service": service,
-            "version": args.tag,
-            "status": "success" if success else "failed",
-            "deployed_by": os.environ.get("USER", "unknown"),
-        })
-        save_deployment_history(args.env, history)
+        # Record deployment (skip in dry-run mode)
+        if not args.dry_run:
+            history = load_deployment_history(args.env)
+            history.append({
+                "timestamp": datetime.now().isoformat(),
+                "service": service,
+                "version": args.tag,
+                "status": "success" if success else "failed",
+                "deployed_by": os.environ.get("USER", "unknown"),
+            })
+            save_deployment_history(args.env, history)
 
         if success:
-            print(f"✓ {service} deployed successfully to {args.env}")
+            if not args.dry_run:
+                print(f"✓ {service} deployed successfully to {args.env}")
         else:
-            print(f"✗ {service} deployment FAILED")
+            if not args.dry_run:
+                print(f"✗ {service} deployment FAILED")
             all_successful = False
             if args.service != "all":
                 break
+
+    if args.dry_run:
+        action_count = get_dry_run_counter()
+        print(f"\n{'='*60}")
+        print(f"Dry-run complete: {action_count} actions would have been executed")
+        print(f"{'='*60}\n")
 
     return 0 if all_successful else 1
 

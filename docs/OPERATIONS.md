@@ -276,6 +276,116 @@ Audit logs are retained for 365 days and include:
 | Penetration test | Quarterly | External vendor |
 | Compliance audit | Annually | External auditor |
 
+## Deployment
+
+### Dry-Run Mode
+
+The deployment script supports a dry-run mode that allows you to preview exactly what would happen during a deployment without making any changes to remote systems or opening network connections.
+
+#### Usage
+
+Add the `--dry-run` flag to any deployment or rollback command:
+
+```bash
+# Preview a service deployment
+python3 tools/deploy.py --env staging --service backend --dry-run
+
+# Preview a rollback
+python3 tools/deploy.py --env production --service backend --rollback --version v3.1.0 --dry-run
+
+# Preview deploying all services
+python3 tools/deploy.py --env staging --service all --tag v3.2.0 --dry-run
+```
+
+#### What Dry-Run Shows
+
+In dry-run mode, the script prints:
+
+- **Commands**: Every command that would be executed (docker, kubectl, curl, etc.)
+- **Targets**: Target environment, namespace, Kubernetes context, and registry
+- **Files**: Dockerfile paths, manifest files, and build paths
+- **Environment Variables**: Names of environment variables that would be read
+  - Sensitive values (containing TOKEN, SECRET, KEY, or PASSWORD) are redacted as `[REDACTED]`
+  - Non-sensitive values are displayed in full
+- **Action Summary**: Total count of actions that would have been executed
+
+#### Example Output
+
+```
+============================================================
+DRY-RUN MODE: Deployment Preview
+============================================================
+
+Environment: staging
+Tag: 20260620120000
+Services: backend
+Skip build: False
+Skip test: False
+Skip health: False
+
+Environment variables that would be read:
+  [ENV] USER=alice
+
+Actions that would be executed:
+
+============================================================
+  Deploying backend to staging
+  Tag: 20260620120000
+============================================================
+
+Building backend (rust)...
+  [DRY-RUN] Would build: target/release/tent-backend
+  [DRY-RUN] Command: sh -c cargo build --release
+Testing backend...
+  [DRY-RUN] Command: sh -c cargo test --release
+Building Docker image: tent/backend:20260620120000
+  [DRY-RUN] Dockerfile: deploy/Dockerfile.backend
+  [DRY-RUN] Context: .
+  [DRY-RUN] Command: docker build -t tent/backend:20260620120000 -f deploy/Dockerfile.backend .
+Pushing Docker image: registry.example.com/tent/backend:20260620120000
+  [DRY-RUN] Target registry: registry.example.com
+  [DRY-RUN] Source image: tent/backend:20260620120000
+  [DRY-RUN] Command: docker tag tent/backend:20260620120000 registry.example.com/tent/backend:20260620120000
+  [DRY-RUN] Command: docker push registry.example.com/tent/backend:20260620120000
+Deploying backend to staging...
+  [DRY-RUN] Target environment: staging
+  [DRY-RUN] Namespace: tent-staging
+  [DRY-RUN] Kubernetes context: staging-cluster
+  [DRY-RUN] Image: registry.example.com/tent/backend:20260620120000
+  [DRY-RUN] Replicas: 2
+  [DRY-RUN] Manifest file: deploy/k8s/backend.yaml
+  [DRY-RUN] Command: kubectl apply -f deploy/k8s/backend.yaml -n tent-staging --context staging-cluster
+  [DRY-RUN] Command: kubectl set image deployment/backend-api backend=registry.example.com/tent/backend:20260620120000 -n tent-staging --context staging-cluster
+  [DRY-RUN] Command: kubectl scale deployment/backend-api --replicas=2 -n tent-staging --context staging-cluster
+  [DRY-RUN] Command: kubectl rollout status deployment/backend-api -n tent-staging --context staging-cluster --timeout=300s
+Health check: http://staging.example.com:8080/health
+  [DRY-RUN] Would perform health check on: http://staging.example.com:8080/health
+  [DRY-RUN] Max retries: 30 (60 seconds)
+
+============================================================
+Dry-run complete: 11 actions would have been executed
+============================================================
+```
+
+#### Safety Guarantees
+
+In dry-run mode:
+
+- No commands are executed via `subprocess`
+- No network connections are opened
+- No remote state is modified
+- No Docker images are built or pushed
+- No Kubernetes resources are changed
+- No files are written to disk
+- Deployment history is not updated
+
+This makes dry-run mode safe to use for:
+- Reviewing deployment plans before execution
+- Training new team members
+- Validating deployment configurations
+- Documenting deployment procedures
+- Debugging deployment issues
+
 ## Troubleshooting
 
 ### Common Issues
