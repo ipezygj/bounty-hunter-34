@@ -430,3 +430,600 @@ pub fn validate_price(price: f64) -> bool {
 pub fn validate_quantity(qty: f64) -> bool {
     qty > 0.0 && qty < 100_000_000.0
 }
+
+// ---------------------------------------------------------------------------
+// TESTS
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // -----------------------------------------------------------------------
+    // ValidationResult Tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_validation_result_valid() {
+        let result = ValidationResult::valid();
+        assert!(result.valid);
+        assert!(result.errors.is_empty());
+        assert!(result.warnings.is_empty());
+    }
+
+    #[test]
+    fn test_validation_result_error() {
+        let result = ValidationResult::error("field1", "code1", "Error message");
+        assert!(!result.valid);
+        assert_eq!(result.errors.len(), 1);
+        assert_eq!(result.errors[0].field, "field1");
+        assert_eq!(result.errors[0].code, "code1");
+        assert_eq!(result.errors[0].message, "Error message");
+        assert_eq!(result.errors[0].severity, Severity::Error);
+    }
+
+    #[test]
+    fn test_validation_result_combine() {
+        let mut result1 = ValidationResult::valid();
+        let result2 = ValidationResult::error("field2", "code2", "Error 2");
+
+        result1.combine(result2);
+        assert!(!result1.valid);
+        assert_eq!(result1.errors.len(), 1);
+    }
+
+    #[test]
+    fn test_validation_result_add_error() {
+        let mut result = ValidationResult::valid();
+        result.add_error("field", "code", "message");
+        assert!(!result.valid);
+        assert_eq!(result.errors.len(), 1);
+    }
+
+    #[test]
+    fn test_validation_result_add_warning() {
+        let mut result = ValidationResult::valid();
+        result.add_warning("warning message");
+        assert!(result.valid); // warnings don't make it invalid
+        assert_eq!(result.warnings.len(), 1);
+    }
+
+    #[test]
+    fn test_validation_result_has_errors() {
+        let mut result = ValidationResult::valid();
+        assert!(!result.has_errors());
+
+        result.add_error("field", "code", "message");
+        assert!(result.has_errors());
+    }
+
+    #[test]
+    fn test_validation_result_has_warnings() {
+        let mut result = ValidationResult::valid();
+        assert!(!result.has_warnings());
+
+        result.add_warning("warning");
+        assert!(result.has_warnings());
+    }
+
+    // -----------------------------------------------------------------------
+    // RequiredValidator Tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_required_validator_with_some() {
+        let validator = RequiredValidator;
+        let value: Option<String> = Some("test".to_string());
+        let result = validator.validate(&value, "field");
+        assert!(result.valid);
+    }
+
+    #[test]
+    fn test_required_validator_with_none() {
+        let validator = RequiredValidator;
+        let value: Option<String> = None;
+        let result = validator.validate(&value, "field");
+        assert!(!result.valid);
+        assert_eq!(result.errors.len(), 1);
+        assert_eq!(result.errors[0].code, "required");
+    }
+
+    // -----------------------------------------------------------------------
+    // StringLengthValidator Tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_string_length_validator_min_valid() {
+        let validator = StringLengthValidator {
+            min: Some(3),
+            max: None,
+        };
+        let result = validator.validate(&"hello".to_string(), "field");
+        assert!(result.valid);
+    }
+
+    #[test]
+    fn test_string_length_validator_min_invalid() {
+        let validator = StringLengthValidator {
+            min: Some(5),
+            max: None,
+        };
+        let result = validator.validate(&"hi".to_string(), "field");
+        assert!(!result.valid);
+        assert_eq!(result.errors[0].code, "min_length");
+    }
+
+    #[test]
+    fn test_string_length_validator_max_valid() {
+        let validator = StringLengthValidator {
+            min: None,
+            max: Some(5),
+        };
+        let result = validator.validate(&"hi".to_string(), "field");
+        assert!(result.valid);
+    }
+
+    #[test]
+    fn test_string_length_validator_max_invalid() {
+        let validator = StringLengthValidator {
+            min: None,
+            max: Some(3),
+        };
+        let result = validator.validate(&"hello".to_string(), "field");
+        assert!(!result.valid);
+        assert_eq!(result.errors[0].code, "max_length");
+    }
+
+    #[test]
+    fn test_string_length_validator_range() {
+        let validator = StringLengthValidator {
+            min: Some(2),
+            max: Some(5),
+        };
+        assert!(validator.validate(&"hi".to_string(), "field").valid);
+        assert!(validator.validate(&"hello".to_string(), "field").valid);
+        assert!(!validator.validate(&"x".to_string(), "field").valid);
+        assert!(!validator.validate(&"toolong".to_string(), "field").valid);
+    }
+
+    // -----------------------------------------------------------------------
+    // NumericRangeValidator Tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_numeric_range_validator_min_valid() {
+        let validator = NumericRangeValidator {
+            min: Some(0.0),
+            max: None,
+        };
+        let result = validator.validate(&5.5, "field");
+        assert!(result.valid);
+    }
+
+    #[test]
+    fn test_numeric_range_validator_min_invalid() {
+        let validator = NumericRangeValidator {
+            min: Some(10.0),
+            max: None,
+        };
+        let result = validator.validate(&5.5, "field");
+        assert!(!result.valid);
+        assert_eq!(result.errors[0].code, "min_value");
+    }
+
+    #[test]
+    fn test_numeric_range_validator_max_valid() {
+        let validator = NumericRangeValidator {
+            min: None,
+            max: Some(100.0),
+        };
+        let result = validator.validate(&50.0, "field");
+        assert!(result.valid);
+    }
+
+    #[test]
+    fn test_numeric_range_validator_max_invalid() {
+        let validator = NumericRangeValidator {
+            min: None,
+            max: Some(50.0),
+        };
+        let result = validator.validate(&100.0, "field");
+        assert!(!result.valid);
+        assert_eq!(result.errors[0].code, "max_value");
+    }
+
+    // -----------------------------------------------------------------------
+    // EnumValidator Tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_enum_validator_valid() {
+        let validator = EnumValidator {
+            variants: &["red", "green", "blue"],
+        };
+        let result = validator.validate(&"red".to_string(), "field");
+        assert!(result.valid);
+    }
+
+    #[test]
+    fn test_enum_validator_invalid() {
+        let validator = EnumValidator {
+            variants: &["red", "green", "blue"],
+        };
+        let result = validator.validate(&"yellow".to_string(), "field");
+        assert!(!result.valid);
+        assert_eq!(result.errors[0].code, "invalid_value");
+    }
+
+    // -----------------------------------------------------------------------
+    // EmailValidator Tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_email_validator_valid() {
+        let validator = EmailValidator;
+        assert!(validator.validate(&"test@example.com".to_string(), "field").valid);
+        assert!(validator.validate(&"user.name@company.co.uk".to_string(), "field").valid);
+        assert!(validator.validate(&"a@b.co".to_string(), "field").valid);
+    }
+
+    #[test]
+    fn test_email_validator_invalid() {
+        let validator = EmailValidator;
+        assert!(!validator.validate(&"notanemail".to_string(), "field").valid);
+        assert!(!validator.validate(&"@example.com".to_string(), "field").valid);
+        assert!(!validator.validate(&"user@".to_string(), "field").valid);
+        assert!(!validator.validate(&"user@example".to_string(), "field").valid);
+    }
+
+    // -----------------------------------------------------------------------
+    // validate_email Tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_validate_email_function() {
+        assert!(validate_email("test@example.com"));
+        assert!(validate_email("user+tag@domain.co.uk"));
+        assert!(!validate_email("invalid.email"));
+        assert!(!validate_email("@example.com"));
+    }
+
+    // -----------------------------------------------------------------------
+    // validate_phone Tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_validate_phone() {
+        assert!(validate_phone("+1-555-123-4567"));
+        assert!(validate_phone("5551234567"));
+        assert!(validate_phone("1-800-000-0000"));
+        assert!(!validate_phone("123")); // too short
+        assert!(!validate_phone("1234567890123456")); // too long
+    }
+
+    // -----------------------------------------------------------------------
+    // validate_uuid Tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_validate_uuid() {
+        assert!(validate_uuid("550e8400-e29b-41d4-a716-446655440000"));
+        assert!(validate_uuid("123e4567-e89b-12d3-a456-426614174000"));
+        assert!(!validate_uuid("not-a-uuid"));
+        assert!(!validate_uuid("550e8400-e29b-41d4-a716"));
+        assert!(!validate_uuid("550e8400-e29b-41d4-a716-44665544000z"));
+    }
+
+    // -----------------------------------------------------------------------
+    // validate_hex_string Tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_validate_hex_string() {
+        assert!(validate_hex_string("ff00ff00", 4));
+        assert!(validate_hex_string("DEADBEEF", 4));
+        assert!(!validate_hex_string("gg00gg00", 4)); // invalid hex
+        assert!(!validate_hex_string("ff00ff", 4)); // wrong length
+    }
+
+    // -----------------------------------------------------------------------
+    // validate_timestamp Tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_validate_timestamp() {
+        // Valid timestamps
+        assert!(validate_timestamp(946684800000)); // 2000-01-01
+        assert!(validate_timestamp(1577836800000)); // 2020-01-01
+        assert!(validate_timestamp(1687392000000)); // 2023-06-21
+
+        // Invalid timestamps
+        assert!(!validate_timestamp(100)); // too old
+        assert!(!validate_timestamp(5000000000000)); // too far in future
+    }
+
+    // -----------------------------------------------------------------------
+    // validate_symbol Tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_validate_symbol() {
+        assert!(validate_symbol("BTC/USD"));
+        assert!(validate_symbol("ETH/EUR"));
+        assert!(validate_symbol("AAPL/USD"));
+        assert!(!validate_symbol("BTC")); // missing pair
+        assert!(!validate_symbol("BTC/USD/EUR")); // too many parts
+        assert!(!validate_symbol("btc/usd")); // lowercase
+    }
+
+    // -----------------------------------------------------------------------
+    // validate_instrument_id Tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_validate_instrument_id() {
+        assert!(validate_instrument_id("ab"));
+        assert!(validate_instrument_id("btcusd"));
+        assert!(validate_instrument_id("spot0123456789"));
+        assert!(!validate_instrument_id("a")); // too short
+        assert!(!validate_instrument_id("A")); // uppercase
+        assert!(!validate_instrument_id("abcdefghijklmnopqrstuv")); // too long
+    }
+
+    // -----------------------------------------------------------------------
+    // validate_price Tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_validate_price() {
+        assert!(validate_price(0.01));
+        assert!(validate_price(100.50));
+        assert!(validate_price(999.99));
+        assert!(!validate_price(0.0)); // zero
+        assert!(!validate_price(-10.0)); // negative
+        assert!(!validate_price(1_000_000_000.0)); // too large
+    }
+
+    // -----------------------------------------------------------------------
+    // validate_quantity Tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_validate_quantity() {
+        assert!(validate_quantity(1.0));
+        assert!(validate_quantity(1000.0));
+        assert!(validate_quantity(50_000_000.0));
+        assert!(!validate_quantity(0.0)); // zero
+        assert!(!validate_quantity(-10.0)); // negative
+        assert!(!validate_quantity(100_000_000.0)); // at max boundary
+    }
+
+    // -----------------------------------------------------------------------
+    // validate_order_payload Tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_validate_order_payload_valid_market_buy() {
+        let payload = serde_json::json!({
+            "side": "buy",
+            "type": "market",
+            "quantity": 10.5
+        });
+        let result = MessageValidator::validate_order_payload(&payload);
+        assert!(result.valid);
+    }
+
+    #[test]
+    fn test_validate_order_payload_valid_limit_sell() {
+        let payload = serde_json::json!({
+            "side": "sell",
+            "type": "limit",
+            "quantity": 20.0,
+            "price": 150.50,
+            "time_in_force": "gtc"
+        });
+        let result = MessageValidator::validate_order_payload(&payload);
+        assert!(result.valid);
+    }
+
+    #[test]
+    fn test_validate_order_payload_missing_side() {
+        let payload = serde_json::json!({
+            "type": "market",
+            "quantity": 10.0
+        });
+        let result = MessageValidator::validate_order_payload(&payload);
+        assert!(!result.valid);
+        assert!(result.errors.iter().any(|e| e.field == "side"));
+    }
+
+    #[test]
+    fn test_validate_order_payload_invalid_side() {
+        let payload = serde_json::json!({
+            "side": "invalid",
+            "type": "market",
+            "quantity": 10.0
+        });
+        let result = MessageValidator::validate_order_payload(&payload);
+        assert!(!result.valid);
+        assert!(result.errors.iter().any(|e| e.field == "side"));
+    }
+
+    #[test]
+    fn test_validate_order_payload_missing_type() {
+        let payload = serde_json::json!({
+            "side": "buy",
+            "quantity": 10.0
+        });
+        let result = MessageValidator::validate_order_payload(&payload);
+        assert!(!result.valid);
+        assert!(result.errors.iter().any(|e| e.field == "type"));
+    }
+
+    #[test]
+    fn test_validate_order_payload_invalid_type() {
+        let payload = serde_json::json!({
+            "side": "buy",
+            "type": "invalid_type",
+            "quantity": 10.0
+        });
+        let result = MessageValidator::validate_order_payload(&payload);
+        assert!(!result.valid);
+        assert!(result.errors.iter().any(|e| e.field == "type"));
+    }
+
+    #[test]
+    fn test_validate_order_payload_missing_quantity() {
+        let payload = serde_json::json!({
+            "side": "buy",
+            "type": "market"
+        });
+        let result = MessageValidator::validate_order_payload(&payload);
+        assert!(!result.valid);
+        assert!(result.errors.iter().any(|e| e.field == "quantity"));
+    }
+
+    #[test]
+    fn test_validate_order_payload_zero_quantity() {
+        let payload = serde_json::json!({
+            "side": "buy",
+            "type": "market",
+            "quantity": 0.0
+        });
+        let result = MessageValidator::validate_order_payload(&payload);
+        assert!(!result.valid);
+        assert!(result.errors.iter().any(|e| e.field == "quantity"));
+    }
+
+    #[test]
+    fn test_validate_order_payload_excessive_quantity() {
+        let payload = serde_json::json!({
+            "side": "buy",
+            "type": "market",
+            "quantity": 2_000_000.0
+        });
+        let result = MessageValidator::validate_order_payload(&payload);
+        assert!(!result.valid);
+        assert!(result.errors.iter().any(|e| e.field == "quantity"));
+    }
+
+    #[test]
+    fn test_validate_order_payload_limit_order_missing_price() {
+        let payload = serde_json::json!({
+            "side": "buy",
+            "type": "limit",
+            "quantity": 10.0
+        });
+        let result = MessageValidator::validate_order_payload(&payload);
+        assert!(!result.valid);
+        assert!(result.errors.iter().any(|e| e.field == "price"));
+    }
+
+    #[test]
+    fn test_validate_order_payload_limit_order_invalid_price() {
+        let payload = serde_json::json!({
+            "side": "buy",
+            "type": "limit",
+            "quantity": 10.0,
+            "price": 0.0
+        });
+        let result = MessageValidator::validate_order_payload(&payload);
+        assert!(!result.valid);
+        assert!(result.errors.iter().any(|e| e.field == "price"));
+    }
+
+    #[test]
+    fn test_validate_order_payload_invalid_tif() {
+        let payload = serde_json::json!({
+            "side": "buy",
+            "type": "limit",
+            "quantity": 10.0,
+            "price": 100.0,
+            "time_in_force": "invalid_tif"
+        });
+        let result = MessageValidator::validate_order_payload(&payload);
+        assert!(!result.valid);
+        assert!(result.errors.iter().any(|e| e.field == "time_in_force"));
+    }
+
+    // -----------------------------------------------------------------------
+    // validate_account_payload Tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_validate_account_payload_valid() {
+        let payload = serde_json::json!({
+            "amount": 1000.0,
+            "currency": "USD"
+        });
+        let result = MessageValidator::validate_account_payload(&payload);
+        assert!(result.valid);
+    }
+
+    #[test]
+    fn test_validate_account_payload_zero_amount() {
+        let payload = serde_json::json!({
+            "amount": 0.0,
+            "currency": "USD"
+        });
+        let result = MessageValidator::validate_account_payload(&payload);
+        assert!(!result.valid);
+        assert!(result.errors.iter().any(|e| e.field == "amount"));
+    }
+
+    #[test]
+    fn test_validate_account_payload_negative_amount() {
+        let payload = serde_json::json!({
+            "amount": -100.0,
+            "currency": "USD"
+        });
+        let result = MessageValidator::validate_account_payload(&payload);
+        assert!(!result.valid);
+    }
+
+    #[test]
+    fn test_validate_account_payload_excessive_amount() {
+        let payload = serde_json::json!({
+            "amount": 2_000_000_000.0,
+            "currency": "USD"
+        });
+        let result = MessageValidator::validate_account_payload(&payload);
+        assert!(!result.valid);
+        assert!(result.errors.iter().any(|e| e.field == "amount"));
+    }
+
+    #[test]
+    fn test_validate_account_payload_invalid_currency() {
+        let payload = serde_json::json!({
+            "amount": 100.0,
+            "currency": "INVALID"
+        });
+        let result = MessageValidator::validate_account_payload(&payload);
+        assert!(!result.valid);
+        assert!(result.errors.iter().any(|e| e.field == "currency"));
+    }
+
+    #[test]
+    fn test_validate_account_payload_valid_currencies() {
+        for currency in &["USD", "EUR", "GBP", "BTC", "ETH", "USDT", "USDC"] {
+            let payload = serde_json::json!({
+                "amount": 100.0,
+                "currency": currency
+            });
+            let result = MessageValidator::validate_account_payload(&payload);
+            assert!(result.valid, "Currency {} should be valid", currency);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Severity enum Tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_severity_equality() {
+        assert_eq!(Severity::Error, Severity::Error);
+        assert_eq!(Severity::Warning, Severity::Warning);
+        assert_eq!(Severity::Info, Severity::Info);
+        assert_ne!(Severity::Error, Severity::Warning);
+    }
+}
